@@ -61,11 +61,30 @@ export type SessionState =
   | 'showing_feedback';
 
 export interface VoiceSessionMessage {
-  type: 'start_session' | 'audio_chunk' | 'end_audio' | 'command';
+  type:
+    | 'start_session'
+    | 'audio_chunk'
+    | 'end_audio'
+    | 'command'
+    | 'text_answer'
+    | 'rate_card'
+    | 'next_card';
   data?: unknown;
+  card_limit?: number;
+  answer?: string;
+  rating?: ReviewRating;
 }
 
 export interface VoiceSessionResponse {
-  type: 'card_presented' | 'audio_chunk' | 'evaluation' | 'session_state';
+  type:
+    | 'card_presented'
+    | 'audio_chunk'
+    | 'evaluation'
+    | 'session_state'
+    | 'session_started'
+    | 'session_ended'
+    | 'session_complete'
+    | 'state_changed'
+    | 'error';
   data?: unknown;
 }

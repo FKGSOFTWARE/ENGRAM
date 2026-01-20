@@ -72,6 +72,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// Check if the database needs migrations
+#[allow(dead_code)]
 pub async fn needs_migration(pool: &SqlitePool) -> bool {
     // Check if migrations table exists
     let table_exists: Option<i32> = sqlx::query_scalar(

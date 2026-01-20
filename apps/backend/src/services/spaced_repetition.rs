@@ -224,6 +224,7 @@ pub fn calculate_fsrs(
 /// - repetitions → reps
 ///
 /// Returns: (new_interval, new_ease_factor_equivalent, new_repetitions, next_review_date)
+#[allow(dead_code)] // Kept for backward compatibility with external integrations
 pub fn calculate_sm2(
     current_interval: i32,
     current_ease_factor: f64,

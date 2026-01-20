@@ -41,6 +41,7 @@ pub enum ClientMessage {
 // Server -> Client messages
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(dead_code)] // AudioChunk reserved for future TTS streaming
 pub enum ServerMessage {
     SessionStarted { card_count: i32 },
     SessionEnded,
@@ -241,24 +242,35 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         _ => crate::models::ReviewRating::Good,
                     };
 
-                    // Update card scheduling
-                    let (new_interval, new_ease_factor, new_repetitions, next_review) =
-                        crate::services::spaced_repetition::calculate_sm2(
-                            card.interval,
-                            card.ease_factor,
-                            card.repetitions,
-                            rating_enum,
-                        );
+                    // Build FSRS state from card
+                    let fsrs_state = crate::services::spaced_repetition::FSRSState {
+                        stability: card.stability,
+                        difficulty: card.difficulty,
+                        reps: card.repetitions,
+                        lapses: card.lapses,
+                        last_review: card.last_review,
+                    };
+
+                    // Calculate new scheduling using FSRS directly
+                    let (new_interval, new_stability, new_difficulty, new_reps, new_lapses, next_review) =
+                        crate::services::spaced_repetition::calculate_fsrs(&fsrs_state, rating_enum, None);
+
+                    // Map difficulty back to ease_factor for backward compatibility
+                    let new_ease_factor = (2.5 - (new_difficulty - 1.0) * 0.17).clamp(1.3, 3.0);
 
                     let now = chrono::Utc::now();
                     let _ = sqlx::query(
-                        "UPDATE cards SET interval = ?, ease_factor = ?, repetitions = ?, next_review = ?, updated_at = ? WHERE id = ?",
+                        "UPDATE cards SET interval = ?, ease_factor = ?, repetitions = ?, stability = ?, difficulty = ?, lapses = ?, next_review = ?, last_review = ?, updated_at = ? WHERE id = ?",
                     )
                     .bind(new_interval)
                     .bind(new_ease_factor)
-                    .bind(new_repetitions)
+                    .bind(new_reps)
+                    .bind(new_stability)
+                    .bind(new_difficulty)
+                    .bind(new_lapses)
                     .bind(&next_review)
-                    .bind(&now)
+                    .bind(&now)  // last_review is now
+                    .bind(&now)  // updated_at
                     .bind(&card.id)
                     .execute(&state.db)
                     .await;

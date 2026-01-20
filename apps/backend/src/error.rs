@@ -150,6 +150,7 @@ impl From<serde_json::Error> for AppError {
 pub type AppResult<T> = Result<T, AppError>;
 
 /// Helper trait for converting Option to AppError::NotFound
+#[allow(dead_code)]
 pub trait OptionExt<T> {
     fn ok_or_not_found(self, resource: &'static str, id: impl Into<String>) -> AppResult<T>;
 }

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { api } from '$lib/api/client';
 
-  type Tab = 'text' | 'url';
+  type Tab = 'text' | 'url' | 'pdf';
 
   let activeTab = $state<Tab>('text');
   let textContent = $state('');
   let textTitle = $state('');
   let urlInput = $state('');
+  let pdfFile = $state<File | null>(null);
+  let pdfTitle = $state('');
   let maxCards = $state(10);
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -86,6 +88,57 @@
       error = e instanceof Error ? e.message : 'Failed to generate cards';
     } finally {
       loading = false;
+    }
+  }
+
+  async function handlePdfSubmit() {
+    if (!pdfFile) return;
+
+    loading = true;
+    error = null;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', pdfFile);
+      if (pdfTitle.trim()) {
+        formData.append('title', pdfTitle);
+      }
+      formData.append('max_cards', maxCards.toString());
+
+      const response = await fetch('/api/ingest/pdf', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.error) {
+        error = data.error;
+      } else {
+        sourceId = data.source_id;
+        stagedCards = data.staged_cards;
+        showPreview = true;
+        pdfFile = null;
+        pdfTitle = '';
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to process PDF';
+    } finally {
+      loading = false;
+    }
+  }
+
+  function handleFileSelect(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files[0]) {
+      const file = input.files[0];
+      if (file.type === 'application/pdf') {
+        pdfFile = file;
+        error = null;
+      } else {
+        error = 'Please select a PDF file';
+        pdfFile = null;
+      }
     }
   }
 
@@ -181,6 +234,13 @@
       >
         URL
       </button>
+      <button
+        class="tab"
+        class:active={activeTab === 'pdf'}
+        onclick={() => (activeTab = 'pdf')}
+      >
+        PDF
+      </button>
     </div>
 
     {#if error}
@@ -207,7 +267,7 @@
             placeholder="Paste your text content here..."
           ></textarea>
         </div>
-      {:else}
+      {:else if activeTab === 'url'}
         <div class="form-group">
           <label for="url">URL</label>
           <input
@@ -216,6 +276,33 @@
             bind:value={urlInput}
             placeholder="https://example.com/article"
           />
+        </div>
+      {:else}
+        <div class="form-group">
+          <label for="pdfTitle">Title (optional)</label>
+          <input
+            type="text"
+            id="pdfTitle"
+            bind:value={pdfTitle}
+            placeholder="e.g., Research Paper Chapter 3"
+          />
+        </div>
+        <div class="form-group">
+          <label for="pdf">PDF File</label>
+          <div class="file-input-wrapper">
+            <input
+              type="file"
+              id="pdf"
+              accept="application/pdf"
+              onchange={handleFileSelect}
+            />
+            {#if pdfFile}
+              <div class="file-info">
+                <span class="file-name">{pdfFile.name}</span>
+                <span class="file-size">({(pdfFile.size / 1024).toFixed(1)} KB)</span>
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
 
@@ -232,10 +319,10 @@
 
       <button
         class="btn btn-primary"
-        disabled={loading || (activeTab === 'text' ? !textContent.trim() : !urlInput.trim())}
-        onclick={activeTab === 'text' ? handleTextSubmit : handleUrlSubmit}
+        disabled={loading || (activeTab === 'text' ? !textContent.trim() : activeTab === 'url' ? !urlInput.trim() : !pdfFile)}
+        onclick={activeTab === 'text' ? handleTextSubmit : activeTab === 'url' ? handleUrlSubmit : handlePdfSubmit}
       >
-        {loading ? 'Generating...' : 'Generate Cards'}
+        {loading ? 'Processing...' : 'Generate Cards'}
       </button>
     </div>
   {:else}
@@ -562,5 +649,43 @@
     display: flex;
     gap: 1rem;
     justify-content: flex-end;
+  }
+
+  .file-input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .file-input-wrapper input[type='file'] {
+    padding: 0.75rem;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    background: var(--background);
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .file-input-wrapper input[type='file']:hover {
+    border-color: var(--primary);
+  }
+
+  .file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: var(--surface-alt, #f0f0f0);
+    border-radius: 4px;
+    font-size: 0.875rem;
+  }
+
+  .file-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .file-size {
+    color: var(--text-secondary);
   }
 </style>

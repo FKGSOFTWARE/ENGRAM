@@ -7,6 +7,7 @@ use thiserror::Error;
 
 /// Errors that can occur during PDF processing
 #[derive(Error, Debug)]
+#[allow(dead_code)] // Variants reserved for comprehensive error handling
 pub enum PdfError {
     #[error("Failed to extract text from PDF: {0}")]
     ExtractionError(String),
@@ -47,6 +48,7 @@ impl Default for PdfConfig {
 
 /// Result of PDF text extraction
 #[derive(Debug)]
+#[allow(dead_code)] // Fields available for API response expansion
 pub struct PdfContent {
     /// Extracted text content
     pub text: String,
