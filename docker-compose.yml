@@ -63,7 +63,7 @@ services:
       context: ./apps/frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "3000:3000"
     environment:
       - VITE_API_URL=http://localhost:3001
       - VITE_VOICE_SERVICE_PORT=8001

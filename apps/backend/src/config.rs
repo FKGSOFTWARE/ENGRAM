@@ -137,7 +137,7 @@ impl LlmConfig {
                 .or_else(|_| env::var("GEMINI_API_KEY"))
                 .ok(),
             default_model: env::var("LLM_DEFAULT_MODEL")
-                .unwrap_or_else(|_| "gemini-1.5-flash".to_string()),
+                .unwrap_or_else(|_| "gemini-2.5-flash".to_string()),
             max_tokens: env::var("LLM_MAX_TOKENS")
                 .ok()
                 .and_then(|t| t.parse().ok())

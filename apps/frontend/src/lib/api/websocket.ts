@@ -86,7 +86,8 @@ export class VoiceWebSocket {
   }
 
   rateCard(rating: 'again' | 'hard' | 'good' | 'easy'): void {
-    this.send({ type: 'rate_card', rating } as VoiceSessionMessage);
+    const ratingMap = { again: 0, hard: 1, good: 2, easy: 3 };
+    this.send({ type: 'rate_card', rating: ratingMap[rating] } as VoiceSessionMessage);
   }
 
   nextCard(): void {

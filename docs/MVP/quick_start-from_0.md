@@ -14,7 +14,7 @@ Before starting, ensure you have installed:
 | Node.js | 20+ | `node --version` |
 | pnpm | 9+ | `pnpm --version` |
 | Rust | 1.75+ | `rustc --version` |
-| Python | 3.10+ | `python3 --version` |
+| Python | 3.10+ | `python3 --version` (use `python3`, not `python`) |
 
 **Optional but recommended**:
 - CUDA toolkit (for GPU-accelerated Whisper STT)
@@ -33,9 +33,9 @@ cd ENGRAM
 # Install frontend dependencies
 pnpm install
 
-# Install Python voice service
+# Install Python voice service dependencies
 cd apps/voice
-pip install -e .
+pip install pydantic-settings fastapi uvicorn httpx faster-whisper edge-tts
 cd ../..
 ```
 
@@ -100,16 +100,21 @@ Expected: `Listening on 0.0.0.0:3001`
 **Terminal 2 - Voice Service**:
 ```bash
 cd /home/goose/ENGRAM/apps/voice
-python -m src.main
+python3 -m src.main
 ```
 Expected: `Uvicorn running on http://0.0.0.0:8001`
+
+**Note**: First run downloads models (~150MB Whisper, ~20MB Silero VAD).
+- First run: 2-5 minutes (downloading)
+- Subsequent runs: ~40 seconds (loading from cache)
+- Health check: `curl http://localhost:8001/health` → `{"status":"healthy","pipeline_ready":true}`
 
 **Terminal 3 - Frontend**:
 ```bash
 cd /home/goose/ENGRAM
 pnpm dev:frontend
 ```
-Expected: `Local: http://localhost:5173/`
+Expected: `Local: http://localhost:3000/`
 
 ### Option C: Docker
 
@@ -122,7 +127,7 @@ docker-compose logs -f  # Watch logs
 
 ## Step 4: Access the Application
 
-Open your browser to: **http://localhost:5173**
+Open your browser to: **http://localhost:3000**
 
 You should see the ENGRAM dashboard with:
 - Navigation: Dashboard, Review, Cards, Import, Settings

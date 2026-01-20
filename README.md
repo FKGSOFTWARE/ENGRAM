@@ -105,7 +105,7 @@ pnpm dev:frontend
 
 4. **Access the app**
 
-- Frontend: http://localhost:5173
+- Frontend: http://localhost:3000
 - Backend API: http://localhost:3001
 - Voice Service: http://localhost:8001
 

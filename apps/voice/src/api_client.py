@@ -58,7 +58,7 @@ class EngramAPIClient:
             params["deck_id"] = deck_id
 
         try:
-            response = await client.get("/api/review/due", params=params)
+            response = await client.get("/api/review/next", params=params)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:

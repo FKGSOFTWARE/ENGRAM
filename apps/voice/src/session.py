@@ -11,6 +11,7 @@ Manages the flow of voice-based flashcard review sessions:
 
 import asyncio
 import base64
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -103,8 +104,14 @@ class VoiceSession:
             try:
                 data = await self.websocket.receive()
 
+                # Check for disconnect
+                if data.get("type") == "websocket.disconnect":
+                    logger.info("WebSocket disconnected by client")
+                    break
+
                 if "text" in data:
-                    message = await self.websocket.receive_json()
+                    # Parse the JSON from the already-received text message
+                    message = json.loads(data["text"])
                     await self._handle_message(message)
                 elif "bytes" in data:
                     await self._handle_audio_chunk(data["bytes"])
@@ -113,7 +120,12 @@ class VoiceSession:
             except Exception as e:
                 logger.error(f"Streaming session error: {e}", exc_info=True)
                 self.state = SessionState.ERROR
-                await self._send_error(str(e))
+                # Only try to send error if it's not a connection error
+                if "disconnect" not in str(e).lower() and "closed" not in str(e).lower():
+                    try:
+                        await self._send_error(str(e))
+                    except Exception:
+                        pass  # Connection already closed
                 break
 
     async def _handle_message(self, message: dict) -> None:
