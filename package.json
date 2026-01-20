@@ -1,0 +1,17 @@
+{
+  "name": "engram",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "cargo run -p engram-backend",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "check": "pnpm -r check"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

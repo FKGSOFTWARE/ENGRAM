@@ -1,0 +1,247 @@
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+use super::provider::{
+    CardEvaluation, EvaluationRequest, GeneratedCard, GenerationRequest, LlmError, LlmProvider,
+    SuggestedRating, EVALUATION_SYSTEM_PROMPT, GENERATION_SYSTEM_PROMPT,
+};
+
+const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+
+pub struct OpenAIProvider {
+    api_key: String,
+    client: reqwest::Client,
+    model: String,
+}
+
+impl OpenAIProvider {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            model: "gpt-4o-mini".to_string(),
+        }
+    }
+
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.model = model.to_string();
+        self
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
+    temperature: f32,
+    response_format: ResponseFormat,
+}
+
+#[derive(Debug, Serialize)]
+struct ResponseFormat {
+    #[serde(rename = "type")]
+    format_type: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIResponse {
+    choices: Vec<OpenAIChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIChoice {
+    message: OpenAIResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIResponseMessage {
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EvaluationResponse {
+    is_correct: bool,
+    score: f32,
+    feedback: String,
+    suggested_rating: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GenerationResponse {
+    cards: Vec<GeneratedCardResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeneratedCardResponse {
+    front: String,
+    back: String,
+    tags: Vec<String>,
+}
+
+#[async_trait]
+impl LlmProvider for OpenAIProvider {
+    fn name(&self) -> &'static str {
+        "OpenAI"
+    }
+
+    fn is_available(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+
+    async fn evaluate_answer(&self, request: EvaluationRequest) -> Result<CardEvaluation, LlmError> {
+        let prompt = format!(
+            "Card Question: {}\nExpected Answer: {}\nStudent Answer: {}",
+            request.card_front, request.card_back, request.user_answer
+        );
+
+        let openai_request = OpenAIRequest {
+            model: self.model.clone(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: EVALUATION_SYSTEM_PROMPT.to_string(),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: prompt,
+                },
+            ],
+            temperature: 0.3,
+            response_format: ResponseFormat {
+                format_type: "json_object".to_string(),
+            },
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", OPENAI_API_BASE))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&openai_request)
+            .send()
+            .await
+            .map_err(|e| LlmError::RequestFailed(e.to_string()))?;
+
+        if response.status() == 429 {
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60);
+            return Err(LlmError::RateLimited {
+                retry_after_secs: retry_after,
+            });
+        }
+
+        if response.status() == 401 {
+            return Err(LlmError::InvalidApiKey);
+        }
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(LlmError::RequestFailed(error_text));
+        }
+
+        let openai_response: OpenAIResponse = response
+            .json()
+            .await
+            .map_err(|e| LlmError::ParseError(e.to_string()))?;
+
+        let text = openai_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| LlmError::ParseError("No response content".to_string()))?;
+
+        let eval: EvaluationResponse =
+            serde_json::from_str(&text).map_err(|e| LlmError::ParseError(e.to_string()))?;
+
+        let suggested_rating = match eval.suggested_rating.as_str() {
+            "again" => SuggestedRating::Again,
+            "hard" => SuggestedRating::Hard,
+            "good" => SuggestedRating::Good,
+            "easy" => SuggestedRating::Easy,
+            _ => SuggestedRating::Good,
+        };
+
+        Ok(CardEvaluation {
+            is_correct: eval.is_correct,
+            score: eval.score,
+            feedback: eval.feedback,
+            suggested_rating,
+        })
+    }
+
+    async fn generate_cards(&self, request: GenerationRequest) -> Result<Vec<GeneratedCard>, LlmError> {
+        let prompt = format!(
+            "Generate up to {} flashcards from this content:\n\n{}",
+            request.max_cards, request.content
+        );
+
+        let openai_request = OpenAIRequest {
+            model: self.model.clone(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: GENERATION_SYSTEM_PROMPT.to_string(),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: prompt,
+                },
+            ],
+            temperature: 0.7,
+            response_format: ResponseFormat {
+                format_type: "json_object".to_string(),
+            },
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", OPENAI_API_BASE))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&openai_request)
+            .send()
+            .await
+            .map_err(|e| LlmError::RequestFailed(e.to_string()))?;
+
+        if response.status() == 429 {
+            return Err(LlmError::RateLimited { retry_after_secs: 60 });
+        }
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(LlmError::RequestFailed(error_text));
+        }
+
+        let openai_response: OpenAIResponse = response
+            .json()
+            .await
+            .map_err(|e| LlmError::ParseError(e.to_string()))?;
+
+        let text = openai_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| LlmError::ParseError("No response content".to_string()))?;
+
+        let gen: GenerationResponse =
+            serde_json::from_str(&text).map_err(|e| LlmError::ParseError(e.to_string()))?;
+
+        Ok(gen
+            .cards
+            .into_iter()
+            .map(|c| GeneratedCard {
+                front: c.front,
+                back: c.back,
+                tags: c.tags,
+            })
+            .collect())
+    }
+}
