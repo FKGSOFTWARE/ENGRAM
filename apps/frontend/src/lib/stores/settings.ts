@@ -18,16 +18,29 @@ const defaultSettings: Settings = {
 };
 
 function createSettingsStore() {
-  // Load from localStorage if available
+  // Load non-sensitive settings from localStorage
   const stored = browser ? localStorage.getItem('engram-settings') : null;
-  const initial: Settings = stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
+  // Load API key from sessionStorage (more secure - cleared on browser close)
+  const storedApiKey = browser ? sessionStorage.getItem('engram-api-key') : null;
+
+  const initial: Settings = stored
+    ? { ...defaultSettings, ...JSON.parse(stored), apiKey: storedApiKey }
+    : { ...defaultSettings, apiKey: storedApiKey };
 
   const { subscribe, set, update } = writable<Settings>(initial);
 
-  // Persist to localStorage on changes
+  // Persist to storage on changes
   if (browser) {
     subscribe((value) => {
-      localStorage.setItem('engram-settings', JSON.stringify(value));
+      // Store non-sensitive settings in localStorage
+      const { apiKey, ...nonSensitiveSettings } = value;
+      localStorage.setItem('engram-settings', JSON.stringify(nonSensitiveSettings));
+      // Store API key in sessionStorage (cleared when browser closes)
+      if (apiKey) {
+        sessionStorage.setItem('engram-api-key', apiKey);
+      } else {
+        sessionStorage.removeItem('engram-api-key');
+      }
     });
   }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::llm::{CardEvaluation, EvaluationRequest};
 use crate::models::{Card, Review, SubmitReview};
-use crate::services::spaced_repetition;
+use crate::services::spaced_repetition::{self, FSRSState};
 use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -154,29 +154,42 @@ async fn submit_review(
     // Determine rating (use LLM suggestion if available and no rating provided)
     let rating = payload.rating;
 
-    // Calculate new scheduling using SM-2
-    let (new_interval, new_ease_factor, new_repetitions, next_review) =
-        spaced_repetition::calculate_sm2(
-            card.interval,
-            card.ease_factor,
-            card.repetitions,
-            rating,
-        );
+    // Build FSRS state from card
+    let fsrs_state = FSRSState {
+        stability: card.stability,
+        difficulty: card.difficulty,
+        reps: card.repetitions,
+        lapses: card.lapses,
+        last_review: card.last_review,
+    };
 
-    // Update card with new scheduling
+    // Calculate new scheduling using FSRS directly
+    let (new_interval, new_stability, new_difficulty, new_reps, new_lapses, next_review) =
+        spaced_repetition::calculate_fsrs(&fsrs_state, rating, None);
+
+    // Map difficulty back to ease_factor for backward compatibility
+    let new_ease_factor = (2.5 - (new_difficulty - 1.0) * 0.17).clamp(1.3, 3.0);
+
+    // Update card with new scheduling (both FSRS and legacy fields)
     let updated_at = Utc::now();
     sqlx::query(
         r#"
         UPDATE cards
-        SET interval = ?, ease_factor = ?, repetitions = ?, next_review = ?, updated_at = ?
+        SET interval = ?, ease_factor = ?, repetitions = ?,
+            stability = ?, difficulty = ?, lapses = ?,
+            next_review = ?, last_review = ?, updated_at = ?
         WHERE id = ?
         "#,
     )
     .bind(new_interval)
     .bind(new_ease_factor)
-    .bind(new_repetitions)
+    .bind(new_reps)
+    .bind(new_stability)
+    .bind(new_difficulty)
+    .bind(new_lapses)
     .bind(&next_review)
-    .bind(&updated_at)
+    .bind(&updated_at) // last_review is now
+    .bind(&updated_at) // updated_at
     .bind(&card.id)
     .execute(&state.db)
     .await

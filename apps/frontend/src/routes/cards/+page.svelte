@@ -8,6 +8,7 @@
   let editingCard = $state<Card | null>(null);
   let frontInput = $state('');
   let backInput = $state('');
+  let deleteConfirmId = $state<string | null>(null);
 
   onMount(() => {
     cardsStore.loadFromLocal();
@@ -44,9 +45,18 @@
   }
 
   function handleDelete(id: string) {
-    if (confirm('Are you sure you want to delete this card?')) {
-      cardsStore.delete(id);
+    deleteConfirmId = id;
+  }
+
+  function confirmDelete() {
+    if (deleteConfirmId) {
+      cardsStore.delete(deleteConfirmId);
+      deleteConfirmId = null;
     }
+  }
+
+  function cancelDelete() {
+    deleteConfirmId = null;
   }
 </script>
 
@@ -64,6 +74,19 @@
 
   {#if $cardsStore.error}
     <div class="error">{$cardsStore.error}</div>
+  {/if}
+
+  {#if deleteConfirmId}
+    <div class="modal-overlay" onclick={cancelDelete}>
+      <div class="modal" onclick={(e) => e.stopPropagation()}>
+        <h3>Delete Card</h3>
+        <p>Are you sure you want to delete this card? This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick={cancelDelete}>Cancel</button>
+          <button class="btn btn-danger" onclick={confirmDelete}>Delete</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if showAddForm || editingCard}
@@ -217,5 +240,60 @@
   .card-list {
     display: flex;
     flex-direction: column;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 90%;
+    animation: modalIn 0.2s ease-out;
+  }
+
+  @keyframes modalIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .modal h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.25rem;
+  }
+
+  .modal p {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
+  .btn-danger {
+    background: var(--danger, #dc3545);
+    color: white;
   }
 </style>

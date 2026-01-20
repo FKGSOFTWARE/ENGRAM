@@ -1,0 +1,95 @@
+# ENGRAM Development Docker Compose
+# Orchestrates all services for local development
+
+version: '3.8'
+
+services:
+  # Rust Backend API
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=sqlite:/data/engram.db?mode=rwc
+      - HOST=0.0.0.0
+      - PORT=3001
+      - RUST_LOG=engram_backend=debug,tower_http=debug
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Python Voice Service (Pipecat with STT/TTS)
+  voice:
+    build:
+      context: ./apps/voice
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8001
+      - BACKEND_URL=http://backend:3001
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEBUG=false
+      # Whisper STT settings
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      # TTS settings
+      - TTS_PROVIDER=fallback
+      - TTS_VOICE=en-US-AriaNeural
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # SvelteKit Frontend
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3001
+      - VITE_VOICE_SERVICE_PORT=8001
+      - VITE_USE_PYTHON_VOICE=true
+    depends_on:
+      - backend
+      - voice
+
+  # Nginx Reverse Proxy (Production-like setup)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+      - voice
+    profiles:
+      - production
+
+volumes:
+  data:
+  models:
+
+networks:
+  default:
+    name: engram-network

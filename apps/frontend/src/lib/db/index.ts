@@ -23,7 +23,7 @@ const db = new Dexie('engram') as Dexie & {
 
 db.version(1).stores({
   cards: 'id, front, back, source_id, next_review, created_at, _synced, _deleted',
-  reviews: 'id, card_id, reviewed_at, _synced',
+  reviews: 'id, card_id, reviewed_at, _synced, [card_id+reviewed_at]',
   sources: 'id, source_type, created_at, _synced'
 });
 

@@ -60,11 +60,12 @@ function createCardsStore() {
     },
 
     async create(data: CreateCard) {
+      const localId = crypto.randomUUID();
       try {
         // Create locally first
         const now = new Date().toISOString();
         const localCard: LocalCard = {
-          id: crypto.randomUUID(),
+          id: localId,
           front: data.front,
           back: data.back,
           source_id: data.source_id ?? null,
@@ -78,19 +79,28 @@ function createCardsStore() {
         };
         await db.cards.add(localCard);
 
+        // Add to store immediately for responsive UI
+        update((s) => ({ ...s, cards: [...s.cards, localCard] }));
+
         // Try to sync with server
         try {
           const serverCard = await api.createCard(data);
-          // Update local with server ID
-          await db.cards.delete(localCard.id);
-          await db.cards.add({ ...serverCard, _synced: true });
+          // Use a transaction to atomically replace local card with server version
+          await db.transaction('rw', db.cards, async () => {
+            await db.cards.delete(localId);
+            await db.cards.add({ ...serverCard, _synced: true });
+          });
+          // Update store with server card
           update((s) => ({
             ...s,
-            cards: [...s.cards.filter((c) => c.id !== localCard.id), { ...serverCard, _synced: true }]
+            cards: s.cards.map((c) => (c.id === localId ? { ...serverCard, _synced: true } : c))
           }));
-        } catch {
-          // Offline - keep local card
-          update((s) => ({ ...s, cards: [...s.cards, localCard] }));
+        } catch (syncError) {
+          // Offline - local card is already in store, just update error state
+          update((s) => ({
+            ...s,
+            error: 'Offline - card saved locally, will sync when online'
+          }));
         }
       } catch (e) {
         update((s) => ({

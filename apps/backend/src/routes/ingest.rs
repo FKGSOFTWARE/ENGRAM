@@ -16,6 +16,9 @@ use crate::AppState;
 /// Maximum upload size for PDF files (50MB)
 const MAX_PDF_SIZE: usize = 50 * 1024 * 1024;
 
+/// Maximum text content size (1MB)
+const MAX_TEXT_SIZE: usize = 1024 * 1024;
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/text", post(ingest_text))
@@ -53,6 +56,18 @@ async fn ingest_text(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<IngestTextRequest>,
 ) -> Result<Json<IngestResponse>, StatusCode> {
+    // Validate content size to prevent memory exhaustion
+    if payload.content.len() > MAX_TEXT_SIZE {
+        return Ok(Json(IngestResponse {
+            source_id: String::new(),
+            staged_cards: Vec::new(),
+            error: Some(format!(
+                "Text content too large (max {}KB)",
+                MAX_TEXT_SIZE / 1024
+            )),
+        }));
+    }
+
     // Check LLM availability
     if !state.llm.has_available_provider() {
         return Ok(Json(IngestResponse {
@@ -489,24 +504,40 @@ async fn ingest_pdf_base64(
     }
 }
 
-// Helper function to strip HTML tags
+/// Strip HTML tags from content
+///
+/// This is a simple implementation that removes HTML tags.
+/// For more robust HTML parsing, consider using html2text or scraper crate.
 fn strip_html_tags(html: &str) -> String {
     let mut result = String::new();
     let mut in_tag = false;
-    let in_script = false;
-    let in_style = false;
+    let mut in_script = false;
+    let mut in_style = false;
+    let mut tag_buffer = String::new();
 
     for c in html.chars() {
         match c {
             '<' => {
                 in_tag = true;
+                tag_buffer.clear();
             }
-            '>' => {
+            '>' if in_tag => {
                 in_tag = false;
+                let tag_lower = tag_buffer.to_lowercase();
+                // Track script/style blocks
+                if tag_lower.starts_with("script") {
+                    in_script = true;
+                } else if tag_lower.starts_with("/script") {
+                    in_script = false;
+                } else if tag_lower.starts_with("style") {
+                    in_style = true;
+                } else if tag_lower.starts_with("/style") {
+                    in_style = false;
+                }
+                tag_buffer.clear();
             }
             _ if in_tag => {
-                // Check for script/style tags
-                continue;
+                tag_buffer.push(c);
             }
             _ if !in_script && !in_style => {
                 result.push(c);

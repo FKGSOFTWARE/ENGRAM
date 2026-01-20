@@ -1,31 +1,54 @@
 import type { Card, CreateCard, UpdateCard, SubmitReview } from '@engram/shared';
 
 const API_BASE = '/api';
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
 
 class ApiClient {
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    timeoutMs = DEFAULT_TIMEOUT_MS
   ): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        }
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        let error: string;
+        if (contentType?.includes('application/json')) {
+          const json = await response.json();
+          error = json.message || json.error || `HTTP ${response.status}`;
+        } else {
+          error = (await response.text()) || `HTTP ${response.status}`;
+        }
+        throw new Error(error);
       }
-    });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || `HTTP ${response.status}`);
+      // Handle 204 No Content
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      return response.json();
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    // Handle 204 No Content
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return response.json();
   }
 
   // Cards

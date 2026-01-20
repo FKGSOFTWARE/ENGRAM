@@ -3,6 +3,12 @@ import type { VoiceSessionMessage, VoiceSessionResponse, SessionState } from '@e
 type MessageHandler = (message: VoiceSessionResponse) => void;
 type StateChangeHandler = (state: 'connecting' | 'connected' | 'disconnected' | 'error') => void;
 
+// Voice service endpoint configuration
+// In production, these would be proxied through the same host
+// For development, the Python voice service runs separately
+const VOICE_SERVICE_PORT = import.meta.env.VITE_VOICE_SERVICE_PORT || '8001';
+const USE_PYTHON_VOICE = import.meta.env.VITE_USE_PYTHON_VOICE === 'true';
+
 export class VoiceWebSocket {
   private ws: WebSocket | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
@@ -67,6 +73,26 @@ export class VoiceWebSocket {
     }
   }
 
+  sendEndAudio(): void {
+    this.send({ type: 'end_audio' } as VoiceSessionMessage);
+  }
+
+  startSession(cardLimit = 10): void {
+    this.send({ type: 'start_session', card_limit: cardLimit } as VoiceSessionMessage);
+  }
+
+  submitTextAnswer(answer: string): void {
+    this.send({ type: 'text_answer', answer } as VoiceSessionMessage);
+  }
+
+  rateCard(rating: 'again' | 'hard' | 'good' | 'easy'): void {
+    this.send({ type: 'rate_card', rating } as VoiceSessionMessage);
+  }
+
+  nextCard(): void {
+    this.send({ type: 'next_card' } as VoiceSessionMessage);
+  }
+
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.add(handler);
     return () => this.messageHandlers.delete(handler);
@@ -102,8 +128,30 @@ let voiceWs: VoiceWebSocket | null = null;
 export function getVoiceWebSocket(): VoiceWebSocket {
   if (!voiceWs) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    voiceWs = new VoiceWebSocket(`${protocol}//${host}/api/ws`);
+
+    // Determine voice service URL based on configuration
+    let wsUrl: string;
+    if (USE_PYTHON_VOICE) {
+      // Connect to Python voice service (Pipecat with STT/TTS)
+      const hostname = window.location.hostname;
+      wsUrl = `${protocol}//${hostname}:${VOICE_SERVICE_PORT}/ws/voice/stream`;
+    } else {
+      // Connect to Rust backend WebSocket (text-only evaluation)
+      const host = window.location.host;
+      wsUrl = `${protocol}//${host}/api/ws`;
+    }
+
+    voiceWs = new VoiceWebSocket(wsUrl);
   }
   return voiceWs;
+}
+
+/**
+ * Reset the voice WebSocket singleton (useful for configuration changes)
+ */
+export function resetVoiceWebSocket(): void {
+  if (voiceWs) {
+    voiceWs.disconnect();
+    voiceWs = null;
+  }
 }

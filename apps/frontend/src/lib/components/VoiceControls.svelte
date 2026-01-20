@@ -111,37 +111,8 @@
         source.connect(workletNode);
         workletNode.connect(audioContext.destination);
       } else {
-        // Fallback to ScriptProcessor (deprecated but widely supported)
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        processor.onaudioprocess = (e) => {
-          if (!isRecording) return;
-
-          const inputData = e.inputBuffer.getChannelData(0);
-
-          // Calculate RMS for level meter
-          let sum = 0;
-          for (let i = 0; i < inputData.length; i++) {
-            sum += inputData[i] * inputData[i];
-          }
-          const rms = Math.sqrt(sum / inputData.length);
-          audioLevel = Math.min(1, rms * 10);
-          isSpeaking = rms > 0.01;
-
-          // Convert to Int16 PCM
-          const pcmData = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            const sample = Math.max(-1, Math.min(1, inputData[i]));
-            pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-          }
-
-          // Send via WebSocket
-          const ws = getVoiceWebSocket();
-          ws.sendAudioChunk(pcmData.buffer);
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
+        // AudioWorklet not supported - show error
+        throw new Error('Your browser does not support AudioWorklet. Please use a modern browser (Chrome 66+, Firefox 76+, Safari 14.1+, Edge 79+) for voice features.');
       }
     } catch (e) {
       console.error('Failed to start recording:', e);

@@ -9,10 +9,17 @@ pub struct Card {
     pub front: String,
     pub back: String,
     pub source_id: Option<String>,
+    // Legacy SM-2 field (kept for backward compatibility)
     pub ease_factor: f64,
     pub interval: i32,
     pub repetitions: i32,
+    // FSRS fields
+    pub stability: f64,
+    pub difficulty: f64,
+    pub lapses: i32,
+    // Scheduling
     pub next_review: DateTime<Utc>,
+    pub last_review: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -38,10 +45,14 @@ impl Card {
             front,
             back,
             source_id,
-            ease_factor: 2.5,  // Default SM-2 ease factor
+            ease_factor: 2.5,  // Legacy SM-2 field
             interval: 0,
             repetitions: 0,
+            stability: 0.0,   // FSRS: initial stability
+            difficulty: 5.0,  // FSRS: initial difficulty (middle of 1-10 scale)
+            lapses: 0,
             next_review: now,
+            last_review: None,
             created_at: now,
             updated_at: now,
         }

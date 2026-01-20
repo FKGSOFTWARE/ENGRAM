@@ -22,6 +22,7 @@
   let sourceId = $state('');
   let stagedCards = $state<StagedCard[]>([]);
   let showPreview = $state(false);
+  let successMessage = $state<string | null>(null);
 
   async function handleTextSubmit() {
     if (!textContent.trim()) return;
@@ -125,8 +126,12 @@
       textTitle = '';
       urlInput = '';
 
-      // Show success
-      alert(`Successfully created ${data.created_count} cards!`);
+      // Show success notification
+      successMessage = `Successfully created ${data.created_count} cards!`;
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => {
+        successMessage = null;
+      }, 5000);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to create cards';
     } finally {
@@ -140,9 +145,9 @@
     sourceId = '';
   }
 
-  $effect(() => {
-    const approvedCount = stagedCards.filter(c => c.approved).length;
-  });
+  function dismissSuccess() {
+    successMessage = null;
+  }
 </script>
 
 <svelte:head>
@@ -152,6 +157,13 @@
 <div class="ingest-page">
   <h1>Import Content</h1>
   <p class="subtitle">Generate flashcards from text or URLs using AI</p>
+
+  {#if successMessage}
+    <div class="success-toast" role="alert">
+      <span>{successMessage}</span>
+      <button class="toast-dismiss" onclick={dismissSuccess} aria-label="Dismiss">&times;</button>
+    </div>
+  {/if}
 
   {#if !showPreview}
     <div class="tabs">
@@ -310,6 +322,40 @@
   .subtitle {
     color: var(--text-secondary);
     margin-bottom: 2rem;
+  }
+
+  .success-toast {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    background: #d4edda;
+    color: #155724;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .toast-dismiss {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #155724;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .tabs {

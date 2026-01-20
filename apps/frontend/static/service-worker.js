@@ -16,9 +16,9 @@ const PRECACHE_ASSETS = [
   '/',
   '/offline.html',
   '/manifest.json',
-  '/favicon.png',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/favicon.svg',
+  '/icon-192.svg',
+  '/icon-512.svg',
 ];
 
 // API routes that should use network-first strategy
@@ -224,8 +224,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'Engram', {
       body: data.body || 'Time to review your cards!',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/icon-192.svg',
+      badge: '/icon-192.svg',
       data: data.url || '/',
     })
   );

@@ -23,6 +23,8 @@ impl GeminiProvider {
         }
     }
 
+    /// Configure a custom model (builder pattern for future flexibility)
+    #[allow(dead_code)]
     pub fn with_model(mut self, model: &str) -> Self {
         self.model = model.to_string();
         self

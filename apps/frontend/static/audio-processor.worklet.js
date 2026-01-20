@@ -20,6 +20,10 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.vadThreshold = options?.processorOptions?.vadThreshold || 0.01;
     this.vadEnabled = options?.processorOptions?.vadEnabled ?? true;
 
+    // Store sampleRate from AudioWorkletGlobalScope (available as global in worklet context)
+    // Fallback to common sample rates if not available
+    this.sampleRate = typeof sampleRate !== 'undefined' ? sampleRate : 48000;
+
     // Internal buffer for accumulating samples
     this.buffer = new Float32Array(this.bufferSize);
     this.bufferIndex = 0;
@@ -123,7 +127,7 @@ class AudioProcessor extends AudioWorkletProcessor {
       // Send silence indicator
       this.port.postMessage({
         type: 'silence',
-        duration: this.silentFrames * (this.bufferSize / sampleRate),
+        duration: this.silentFrames * (this.bufferSize / this.sampleRate),
       });
       return;
     }
