@@ -10,9 +10,13 @@
 
   let connectionState = $state<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   let isRecording = $state(false);
+  let isSpeaking = $state(false);
+  let audioLevel = $state(0);
+
   let audioContext: AudioContext | null = null;
   let mediaStream: MediaStream | null = null;
   let workletNode: AudioWorkletNode | null = null;
+  let workletLoaded = false;
 
   async function startVoiceSession() {
     try {
@@ -39,55 +43,139 @@
     connectionState = 'disconnected';
   }
 
+  async function loadAudioWorklet(ctx: AudioContext): Promise<boolean> {
+    if (workletLoaded) return true;
+
+    try {
+      await ctx.audioWorklet.addModule('/audio-processor.worklet.js');
+      workletLoaded = true;
+      return true;
+    } catch (e) {
+      console.warn('AudioWorklet not supported, falling back to ScriptProcessor:', e);
+      return false;
+    }
+  }
+
   async function startRecording() {
     try {
+      // Request microphone access with optimal settings
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 24000,
+          sampleRate: 16000, // Match Whisper's expected sample rate
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: true,
+          autoGainControl: true
         }
       });
 
-      audioContext = new AudioContext({ sampleRate: 24000 });
+      // Create AudioContext with target sample rate
+      audioContext = new AudioContext({ sampleRate: 16000 });
 
-      // Load audio worklet for processing
-      // Note: This is a placeholder - actual worklet implementation needed
+      // Try to use AudioWorklet (modern API)
+      const workletSupported = await loadAudioWorklet(audioContext);
+
       const source = audioContext.createMediaStreamSource(mediaStream);
-
       isRecording = true;
 
-      // For now, use ScriptProcessor as fallback
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (e) => {
-        if (!isRecording) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-        }
-        const ws = getVoiceWebSocket();
-        ws.sendAudioChunk(pcmData.buffer);
-      };
+      if (workletSupported) {
+        // Modern AudioWorklet path
+        workletNode = new AudioWorkletNode(audioContext, 'audio-processor', {
+          processorOptions: {
+            bufferSize: 4096,
+            vadThreshold: 0.01,
+            vadEnabled: true
+          }
+        });
 
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+        // Handle messages from the worklet
+        workletNode.port.onmessage = (event) => {
+          if (!isRecording) return;
+
+          const { type, buffer, isSpeech, rms } = event.data;
+
+          if (type === 'audio') {
+            // Update UI state
+            isSpeaking = isSpeech;
+            audioLevel = Math.min(1, rms * 10); // Normalize for display
+
+            // Send audio chunk via WebSocket
+            const ws = getVoiceWebSocket();
+            ws.sendAudioChunk(buffer);
+          } else if (type === 'silence') {
+            isSpeaking = false;
+            audioLevel = 0;
+          }
+        };
+
+        source.connect(workletNode);
+        workletNode.connect(audioContext.destination);
+      } else {
+        // Fallback to ScriptProcessor (deprecated but widely supported)
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+          if (!isRecording) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+
+          // Calculate RMS for level meter
+          let sum = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            sum += inputData[i] * inputData[i];
+          }
+          const rms = Math.sqrt(sum / inputData.length);
+          audioLevel = Math.min(1, rms * 10);
+          isSpeaking = rms > 0.01;
+
+          // Convert to Int16 PCM
+          const pcmData = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const sample = Math.max(-1, Math.min(1, inputData[i]));
+            pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          }
+
+          // Send via WebSocket
+          const ws = getVoiceWebSocket();
+          ws.sendAudioChunk(pcmData.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+      }
     } catch (e) {
       console.error('Failed to start recording:', e);
+      isRecording = false;
     }
   }
 
   function stopRecording() {
     isRecording = false;
+    isSpeaking = false;
+    audioLevel = 0;
+
+    // Stop the worklet
+    if (workletNode) {
+      workletNode.port.postMessage({ type: 'stop' });
+      workletNode.disconnect();
+      workletNode = null;
+    }
+
+    // Stop media tracks
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
       mediaStream = null;
     }
+
+    // Close audio context
     if (audioContext) {
       audioContext.close();
       audioContext = null;
     }
+
+    // Notify server that audio ended
+    const ws = getVoiceWebSocket();
+    ws.sendEndAudio();
   }
 
   function toggleRecording() {
@@ -102,7 +190,7 @@
 <div class="voice-controls">
   {#if connectionState === 'disconnected'}
     <button class="voice-btn" onclick={startVoiceSession}>
-      🎤 Start Voice Session
+      Start Voice Session
     </button>
   {:else if connectionState === 'connecting'}
     <button class="voice-btn connecting" disabled>
@@ -110,20 +198,31 @@
     </button>
   {:else if connectionState === 'connected'}
     <div class="session-controls">
-      <button
-        class="record-btn"
-        class:recording={isRecording}
-        onclick={toggleRecording}
-      >
-        {isRecording ? '⏹️ Stop' : '🎙️ Record'}
-      </button>
+      <div class="recording-container">
+        <button
+          class="record-btn"
+          class:recording={isRecording}
+          class:speaking={isSpeaking}
+          onclick={toggleRecording}
+        >
+          {isRecording ? 'Stop' : 'Record'}
+        </button>
+        {#if isRecording}
+          <div class="level-meter">
+            <div class="level-fill" style="width: {audioLevel * 100}%"></div>
+          </div>
+          <span class="status-text">
+            {isSpeaking ? 'Listening...' : 'Waiting for speech...'}
+          </span>
+        {/if}
+      </div>
       <button class="end-btn" onclick={endVoiceSession}>
         End Session
       </button>
     </div>
   {:else}
     <button class="voice-btn error" onclick={startVoiceSession}>
-      ⚠️ Connection Error - Retry
+      Connection Error - Retry
     </button>
   {/if}
 </div>
@@ -138,16 +237,21 @@
   .voice-btn {
     padding: 0.75rem 1.5rem;
     font-size: 1rem;
-    background: var(--primary, #007bff);
+    background: var(--accent-light, #e94560);
     color: white;
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, transform 0.1s;
   }
 
   .voice-btn:hover:not(:disabled) {
-    background: var(--primary-dark, #0056b3);
+    background: var(--accent-dark, #d63d55);
+    transform: translateY(-1px);
+  }
+
+  .voice-btn:active:not(:disabled) {
+    transform: translateY(0);
   }
 
   .voice-btn:disabled {
@@ -166,42 +270,89 @@
 
   .session-controls {
     display: flex;
+    align-items: center;
     gap: 1rem;
   }
 
+  .recording-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .record-btn {
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
+    width: 80px;
+    height: 80px;
+    font-size: 0.875rem;
+    font-weight: 600;
     background: var(--success, #28a745);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 50%;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+  }
+
+  .record-btn:hover {
+    transform: scale(1.05);
   }
 
   .record-btn.recording {
     background: var(--danger, #dc3545);
-    animation: pulse 1s infinite;
+    box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.3);
+    animation: pulse-shadow 1.5s infinite;
+  }
+
+  .record-btn.speaking {
+    box-shadow: 0 0 0 6px rgba(40, 167, 69, 0.5);
+  }
+
+  .record-btn.recording.speaking {
+    box-shadow: 0 0 0 6px rgba(220, 53, 69, 0.5);
+  }
+
+  .level-meter {
+    width: 100px;
+    height: 6px;
+    background: var(--bg-tertiary, #2a2a3e);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .level-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success, #28a745), var(--warning, #ffc107));
+    border-radius: 3px;
+    transition: width 0.05s ease-out;
+  }
+
+  .status-text {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #a0a0a0);
   }
 
   .end-btn {
     padding: 0.75rem 1.5rem;
     font-size: 1rem;
-    background: var(--secondary, #6c757d);
-    color: white;
-    border: none;
+    background: var(--bg-secondary, #16213e);
+    color: var(--text-primary, #e8e8e8);
+    border: 1px solid var(--border, #333);
     border-radius: 8px;
     cursor: pointer;
+    transition: background 0.2s;
   }
 
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
+  .end-btn:hover {
+    background: var(--bg-tertiary, #2a2a3e);
+  }
+
+  @keyframes pulse-shadow {
+    0%, 100% {
+      box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.3);
     }
     50% {
-      opacity: 0.7;
+      box-shadow: 0 0 0 8px rgba(220, 53, 69, 0.1);
     }
   }
 </style>

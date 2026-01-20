@@ -1,8 +1,13 @@
+mod config;
 mod db;
+mod error;
 mod llm;
 mod models;
 mod routes;
 mod services;
+
+pub use config::Config;
+pub use error::{AppError, AppResult};
 
 use axum::Router;
 use sqlx::sqlite::SqlitePoolOptions;

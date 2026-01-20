@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e94560"/>
+      <stop offset="100%" style="stop-color:#0f3460"/>
+    </linearGradient>
+    <filter id="glow512" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="80" fill="url(#bg512)"/>
+
+  <!-- Inner subtle border -->
+  <rect x="20" y="20" width="472" height="472" rx="60" fill="none" stroke="#0f3460" stroke-width="2" opacity="0.3"/>
+
+  <!-- Main "E" shape for Engram with shadow -->
+  <g transform="translate(100, 100)" filter="url(#shadow)">
+    <path d="M0 0h240v50H65v90h150v50H65v90h190v50H0V0z" fill="url(#accent512)" filter="url(#glow512)"/>
+  </g>
+
+  <!-- Neural network connections -->
+  <g fill="#e94560" filter="url(#glow512)">
+    <!-- Main nodes -->
+    <circle cx="395" cy="140" r="20"/>
+    <circle cx="425" cy="256" r="15" opacity="0.8"/>
+    <circle cx="395" cy="372" r="20"/>
+
+    <!-- Secondary nodes -->
+    <circle cx="440" cy="190" r="8" opacity="0.6"/>
+    <circle cx="440" cy="322" r="8" opacity="0.6"/>
+
+    <!-- Connection lines -->
+    <path d="M395 160 Q420 200 425 241" stroke="#e94560" stroke-width="3" fill="none" opacity="0.4"/>
+    <path d="M425 271 Q420 312 395 352" stroke="#e94560" stroke-width="3" fill="none" opacity="0.4"/>
+    <path d="M415 140 L432 182" stroke="#e94560" stroke-width="2" fill="none" opacity="0.3"/>
+    <path d="M415 372 L432 330" stroke="#e94560" stroke-width="2" fill="none" opacity="0.3"/>
+  </g>
+
+  <!-- Subtle pattern overlay -->
+  <g opacity="0.03">
+    <circle cx="80" cy="80" r="40" fill="#fff"/>
+    <circle cx="432" cy="432" r="60" fill="#fff"/>
+  </g>
+</svg>

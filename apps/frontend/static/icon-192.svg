@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e94560"/>
+      <stop offset="100%" style="stop-color:#0f3460"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="32" fill="url(#bg192)"/>
+
+  <!-- Main "E" shape for Engram -->
+  <g transform="translate(40, 40)">
+    <path d="M0 0h90v20H25v35h55v20H25v35h70v20H0V0z" fill="url(#accent192)" filter="url(#glow)"/>
+  </g>
+
+  <!-- Neural connection elements -->
+  <g fill="#e94560" filter="url(#glow)">
+    <circle cx="148" cy="55" r="8"/>
+    <circle cx="160" cy="96" r="6" opacity="0.8"/>
+    <circle cx="148" cy="137" r="8"/>
+    <!-- Connection lines -->
+    <path d="M148 63 L160 90" stroke="#e94560" stroke-width="2" opacity="0.5"/>
+    <path d="M160 102 L148 130" stroke="#e94560" stroke-width="2" opacity="0.5"/>
+  </g>
+
+  <!-- Small decorative elements -->
+  <circle cx="168" cy="76" r="3" fill="#e94560" opacity="0.5"/>
+  <circle cx="168" cy="116" r="3" fill="#e94560" opacity="0.5"/>
+</svg>

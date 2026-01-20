@@ -1,66 +1,144 @@
+//! Database Module
+//!
+//! Handles database connection, migrations, and schema management.
+
 use sqlx::SqlitePool;
 
+/// Migration files embedded at compile time
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "000_migrations_table",
+        include_str!("migrations/000_migrations_table.sql"),
+    ),
+    (
+        "001_create_sources",
+        include_str!("migrations/001_create_sources.sql"),
+    ),
+    (
+        "002_create_cards",
+        include_str!("migrations/002_create_cards.sql"),
+    ),
+    (
+        "003_create_reviews",
+        include_str!("migrations/003_create_reviews.sql"),
+    ),
+];
+
+/// Run all pending database migrations
 pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS sources (
-            id TEXT PRIMARY KEY NOT NULL,
-            source_type TEXT NOT NULL,
-            title TEXT,
-            url TEXT,
-            content_hash TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
+    tracing::info!("Running database migrations...");
 
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS cards (
-            id TEXT PRIMARY KEY NOT NULL,
-            front TEXT NOT NULL,
-            back TEXT NOT NULL,
-            source_id TEXT,
-            ease_factor REAL NOT NULL DEFAULT 2.5,
-            interval INTEGER NOT NULL DEFAULT 0,
-            repetitions INTEGER NOT NULL DEFAULT 0,
-            next_review TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE SET NULL
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
+    // First, ensure the migrations table exists
+    let (_, migrations_sql) = MIGRATIONS[0];
+    sqlx::query(migrations_sql).execute(pool).await?;
 
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS reviews (
-            id TEXT PRIMARY KEY NOT NULL,
-            card_id TEXT NOT NULL,
-            rating INTEGER NOT NULL,
-            user_answer TEXT,
-            llm_evaluation TEXT,
-            reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
+    // Get list of already applied migrations
+    let applied: Vec<String> = sqlx::query_scalar("SELECT name FROM _migrations")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
 
-    // Create index for efficient review queue queries
-    sqlx::query(
-        r#"
-        CREATE INDEX IF NOT EXISTS idx_cards_next_review ON cards(next_review)
-        "#,
-    )
-    .execute(pool)
-    .await?;
+    // Run each migration that hasn't been applied
+    let mut applied_count = 0;
+    for (name, sql) in MIGRATIONS.iter().skip(1) {
+        if applied.contains(&name.to_string()) {
+            tracing::debug!("Migration {} already applied, skipping", name);
+            continue;
+        }
 
-    tracing::info!("Database migrations completed");
+        tracing::info!("Applying migration: {}", name);
+
+        // Execute migration SQL (may contain multiple statements)
+        for statement in sql.split(';').filter(|s| !s.trim().is_empty()) {
+            sqlx::query(statement).execute(pool).await?;
+        }
+
+        // Record migration as applied
+        sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
+            .bind(*name)
+            .execute(pool)
+            .await?;
+
+        applied_count += 1;
+    }
+
+    if applied_count > 0 {
+        tracing::info!("Applied {} new migration(s)", applied_count);
+    } else {
+        tracing::info!("Database schema is up to date");
+    }
+
     Ok(())
+}
+
+/// Check if the database needs migrations
+pub async fn needs_migration(pool: &SqlitePool) -> bool {
+    // Check if migrations table exists
+    let table_exists: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='_migrations'",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if table_exists.is_none() {
+        return true;
+    }
+
+    // Check if all migrations are applied
+    let applied_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _migrations")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    // -1 because we don't count the migrations table creation
+    applied_count < (MIGRATIONS.len() as i64 - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn test_migrations() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        // First run should apply all migrations
+        let result = migrate(&pool).await;
+        assert!(result.is_ok());
+
+        // Second run should be a no-op
+        let result = migrate(&pool).await;
+        assert!(result.is_ok());
+
+        // Verify tables exist
+        let sources_exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(sources_exists.is_some());
+
+        let cards_exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cards'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(cards_exists.is_some());
+
+        let reviews_exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reviews'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(reviews_exists.is_some());
+    }
 }

@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-axum = { version = "0.7", features = ["ws", "macros"] }
+axum = { version = "0.7", features = ["ws", "macros", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
@@ -24,3 +24,5 @@ anyhow = "1"
 dotenvy = "0.15"
 async-trait = "0.1"
 futures-util = "0.3"
+pdf-extract = "0.7"
+base64 = "0.22"
