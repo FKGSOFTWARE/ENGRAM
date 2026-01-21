@@ -53,14 +53,14 @@
         switch (message.type) {
           case 'session_started':
             // Session has begun, cards are loaded
-            totalCards = message.total_cards || 0;
+            totalCards = message.total_cards ?? 0;
             currentCardIndex = 0;
             break;
           case 'card_presented':
             currentCardIndex++;  // Increment when new card is presented
             currentCard = {
-              id: message.card_id,
-              front: message.front
+              id: message.card_id ?? '',
+              front: message.front ?? ''
             };
             // Clear previous results for new card
             transcription = null;
@@ -68,16 +68,16 @@
             errorMessage = null;
             break;
           case 'transcription':
-            transcription = message.text;
+            transcription = message.text ?? null;
             processingAudio = false;
             break;
           case 'evaluation':
             evaluation = {
-              is_correct: message.is_correct,
-              rating: message.rating,
-              feedback: message.feedback,
-              expected_answer: message.expected_answer,
-              user_answer: message.user_answer
+              is_correct: message.is_correct ?? false,
+              rating: message.rating ?? 0,
+              feedback: message.feedback ?? '',
+              expected_answer: message.expected_answer ?? '',
+              user_answer: message.user_answer ?? ''
             };
             break;
           case 'card_rated':
@@ -88,7 +88,7 @@
             currentCard = null;
             break;
           case 'error':
-            errorMessage = message.message;
+            errorMessage = message.message ?? null;
             processingAudio = false;
             break;
         }

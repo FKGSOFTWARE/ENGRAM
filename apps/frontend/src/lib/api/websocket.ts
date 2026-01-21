@@ -2,6 +2,7 @@ import type { VoiceSessionMessage, VoiceSessionResponse, SessionState } from '@e
 
 type MessageHandler = (message: VoiceSessionResponse) => void;
 type StateChangeHandler = (state: 'connecting' | 'connected' | 'disconnected' | 'error') => void;
+type ReconnectHandler = (info: { attempt: number; maxAttempts: number; nextRetryMs: number }) => void;
 
 // Voice service endpoint configuration
 // In production, these would be proxied through the same host
@@ -13,6 +14,7 @@ export class VoiceWebSocket {
   private ws: WebSocket | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private stateHandlers: Set<StateChangeHandler> = new Set();
+  private reconnectHandlers: Set<ReconnectHandler> = new Set();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
@@ -77,8 +79,8 @@ export class VoiceWebSocket {
     this.send({ type: 'end_audio' } as VoiceSessionMessage);
   }
 
-  startSession(cardLimit = 10): void {
-    this.send({ type: 'start_session', card_limit: cardLimit } as VoiceSessionMessage);
+  startSession(cardLimit = 10, reviewMode: 'manual' | 'oral' | 'conversational' = 'manual'): void {
+    this.send({ type: 'start_session', card_limit: cardLimit, review_mode: reviewMode } as VoiceSessionMessage);
   }
 
   submitTextAnswer(answer: string): void {
@@ -104,17 +106,47 @@ export class VoiceWebSocket {
     return () => this.stateHandlers.delete(handler);
   }
 
+  onReconnect(handler: ReconnectHandler): () => void {
+    this.reconnectHandlers.add(handler);
+    return () => this.reconnectHandlers.delete(handler);
+  }
+
+  getReconnectInfo(): { attempt: number; maxAttempts: number; isReconnecting: boolean } {
+    return {
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+      isReconnecting: this.reconnectAttempts > 0 && this.reconnectAttempts < this.maxReconnectAttempts,
+    };
+  }
+
   private notifyStateChange(state: 'connecting' | 'connected' | 'disconnected' | 'error'): void {
     this.stateHandlers.forEach((handler) => handler(state));
   }
 
+  private notifyReconnect(info: { attempt: number; maxAttempts: number; nextRetryMs: number }): void {
+    this.reconnectHandlers.forEach((handler) => handler(info));
+  }
+
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      // Notify that max attempts reached
+      this.notifyReconnect({
+        attempt: this.reconnectAttempts,
+        maxAttempts: this.maxReconnectAttempts,
+        nextRetryMs: 0, // No more retries
+      });
       return;
     }
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+    // Notify about reconnection attempt
+    this.notifyReconnect({
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+      nextRetryMs: delay,
+    });
 
     setTimeout(() => {
       console.log(`Reconnecting... attempt ${this.reconnectAttempts}`);

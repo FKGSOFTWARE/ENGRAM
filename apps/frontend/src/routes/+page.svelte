@@ -6,7 +6,8 @@
   let dueCount = $state(0);
 
   onMount(async () => {
-    await cardsStore.loadFromLocal();
+    // Sync with server to get any cards added via API, then load locally
+    await cardsStore.syncWithServer();
     const dueCards = await getDueCards(100);
     dueCount = dueCards.length;
   });

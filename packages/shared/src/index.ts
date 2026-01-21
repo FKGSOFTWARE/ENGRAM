@@ -60,31 +60,73 @@ export type SessionState =
   | 'evaluating'
   | 'showing_feedback';
 
+export type ReviewMode = 'manual' | 'oral' | 'conversational';
+
 export interface VoiceSessionMessage {
   type:
     | 'start_session'
+    | 'end_session'
     | 'audio_chunk'
     | 'end_audio'
     | 'command'
     | 'text_answer'
     | 'rate_card'
-    | 'next_card';
+    | 'next_card'
+    | 'skip_card'
+    | 'replay_card';
   data?: unknown;
   card_limit?: number;
+  review_mode?: ReviewMode;
   answer?: string;
-  rating?: ReviewRating;
+  rating?: ReviewRating | number;
 }
 
 export interface VoiceSessionResponse {
   type:
     | 'card_presented'
+    | 'card_replay'
+    | 'card_rated'
     | 'audio_chunk'
+    | 'transcription'
     | 'evaluation'
     | 'session_state'
     | 'session_started'
     | 'session_ended'
     | 'session_complete'
-    | 'state_changed'
+    | 'session_intro'
+    | 'state_change'
+    | 'vad_status'
     | 'error';
   data?: unknown;
+  // Common fields that may be present
+  card_id?: string;
+  front?: string;
+  spoken_text?: string;
+  audio?: string;
+  audio_duration?: number;
+  sample_rate?: number;
+  card_number?: number;
+  total_cards?: number;
+  text?: string;
+  confidence?: number;
+  duration?: number;
+  rating?: number;
+  is_correct?: boolean;
+  feedback?: string;
+  expected_answer?: string;
+  user_answer?: string;
+  auto_advance?: boolean;
+  auto_rated?: boolean;
+  review_mode?: ReviewMode;
+  stats?: {
+    cards_reviewed: number;
+    correct_count: number;
+    incorrect_count: number;
+    accuracy: number;
+    total_audio_duration?: number;
+  };
+  message?: string;
+  state?: string;
+  speech_probability?: number;
+  is_speech?: boolean;
 }

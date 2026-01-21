@@ -1,12 +1,15 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 
+export type ReviewMode = 'manual' | 'oral' | 'conversational';
+
 interface Settings {
   dailyCardLimit: number;
   voiceEnabled: boolean;
   theme: 'light' | 'dark' | 'system';
   llmProvider: 'gemini' | 'openai' | 'anthropic';
   apiKey: string | null;
+  reviewMode: ReviewMode;
 }
 
 const defaultSettings: Settings = {
@@ -14,7 +17,8 @@ const defaultSettings: Settings = {
   voiceEnabled: true,
   theme: 'system',
   llmProvider: 'gemini',
-  apiKey: null
+  apiKey: null,
+  reviewMode: 'manual'
 };
 
 function createSettingsStore() {
@@ -65,6 +69,10 @@ function createSettingsStore() {
 
     setApiKey(key: string | null) {
       update((s) => ({ ...s, apiKey: key }));
+    },
+
+    setReviewMode(mode: ReviewMode) {
+      update((s) => ({ ...s, reviewMode: mode }));
     },
 
     reset() {

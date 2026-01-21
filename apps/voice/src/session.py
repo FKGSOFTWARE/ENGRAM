@@ -23,7 +23,14 @@ from fastapi import WebSocket
 
 from .api_client import EngramAPIClient
 from .pipeline import VoicePipeline
-from .prompts import build_evaluation_prompt
+from .prompts import (
+    build_evaluation_prompt,
+    build_oral_feedback_prompt,
+    build_conversational_question_prompt,
+    build_conversational_evaluation_prompt,
+    build_session_intro_prompt,
+    build_session_outro_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,14 @@ class SessionState(Enum):
     ENDING = "ending"
     ENDED = "ended"
     ERROR = "error"
+
+
+class ReviewMode(Enum):
+    """Review modes for flashcard sessions."""
+
+    MANUAL = "manual"  # Text-based, click to reveal, click to rate
+    ORAL = "oral"  # Voice answer, LLM evaluates, structured feedback, auto-rates
+    CONVERSATIONAL = "conversational"  # Natural tutoring, Feynman-style, auto-rates
 
 
 @dataclass
@@ -76,6 +91,9 @@ class VoiceSession:
     _current_card: Optional[dict] = field(default=None, init=False)
     _audio_buffer: bytes = field(default=b"", init=False)
     _deck_id: Optional[str] = field(default=None, init=False)
+    _review_mode: ReviewMode = field(default=ReviewMode.MANUAL, init=False)
+    _total_cards: int = field(default=0, init=False)
+    _current_card_number: int = field(default=0, init=False)
 
     def __post_init__(self):
         self._api_client = EngramAPIClient(self.api_base_url)
@@ -133,7 +151,8 @@ class VoiceSession:
         msg_type = message.get("type")
 
         if msg_type == "start_session":
-            await self._start_session(message.get("deck_id"))
+            review_mode = message.get("review_mode", "manual")
+            await self._start_session(message.get("deck_id"), review_mode)
 
         elif msg_type == "end_session":
             await self._end_session()
@@ -163,7 +182,7 @@ class VoiceSession:
         else:
             logger.warning(f"Unknown message type: {msg_type}")
 
-    async def _start_session(self, deck_id: Optional[str]) -> None:
+    async def _start_session(self, deck_id: Optional[str], review_mode: str = "manual") -> None:
         """Start a new review session."""
         if self.state != SessionState.IDLE:
             await self._send_error("Session already in progress")
@@ -171,6 +190,12 @@ class VoiceSession:
 
         self.state = SessionState.STARTING
         self._deck_id = deck_id
+
+        # Parse review mode
+        try:
+            self._review_mode = ReviewMode(review_mode)
+        except ValueError:
+            self._review_mode = ReviewMode.MANUAL
 
         try:
             await self._send_state_update("starting")
@@ -187,11 +212,19 @@ class VoiceSession:
                 self.state = SessionState.ENDED
                 return
 
+            self._total_cards = len(cards)
+            self._current_card_number = 0
+
             await self.websocket.send_json({
                 "type": "session_started",
                 "total_cards": len(cards),
                 "deck_id": deck_id,
+                "review_mode": self._review_mode.value,
             })
+
+            # For conversational mode, generate and speak intro
+            if self._review_mode == ReviewMode.CONVERSATIONAL:
+                await self._conversational_intro()
 
             # Present first card
             await self._present_next_card()
@@ -214,19 +247,30 @@ class VoiceSession:
                 return
 
             self._current_card = cards[0]
+            self._current_card_number += 1
             card_front = self._current_card.get("front", "")
 
-            # Generate TTS for card front
-            tts_result = await self.pipeline.synthesize(card_front)
+            # For conversational mode, add personality to question
+            if self._review_mode == ReviewMode.CONVERSATIONAL:
+                question_text = await self._get_conversational_question(card_front)
+            else:
+                question_text = card_front
+
+            # Generate TTS for question
+            tts_result = await self.pipeline.synthesize(question_text)
 
             # Send card info and audio
             await self.websocket.send_json({
                 "type": "card_presented",
                 "card_id": self._current_card.get("id"),
                 "front": card_front,
+                "spoken_text": question_text,
                 "audio": base64.b64encode(tts_result.audio).decode("utf-8"),
                 "audio_duration": tts_result.duration,
                 "sample_rate": tts_result.sample_rate,
+                "audio_is_silent": getattr(tts_result, 'is_silent', False),
+                "card_number": self._current_card_number,
+                "total_cards": self._total_cards,
             })
 
             # Ready to listen for answer
@@ -310,15 +354,29 @@ class VoiceSession:
             card_front = self._current_card.get("front", "")
             card_back = self._current_card.get("back", "")
 
-            # Build evaluation prompt
-            prompt = build_evaluation_prompt(
-                question=card_front,
-                expected_answer=card_back,
-                user_answer=transcribed_text,
-            )
+            # Build evaluation prompt based on review mode
+            if self._review_mode == ReviewMode.ORAL:
+                prompt = build_oral_feedback_prompt(
+                    question=card_front,
+                    expected_answer=card_back,
+                    user_answer=transcribed_text,
+                )
+            elif self._review_mode == ReviewMode.CONVERSATIONAL:
+                prompt = build_conversational_evaluation_prompt(
+                    question=card_front,
+                    expected_answer=card_back,
+                    user_answer=transcribed_text,
+                )
+            else:
+                # Manual mode uses standard evaluation
+                prompt = build_evaluation_prompt(
+                    question=card_front,
+                    expected_answer=card_back,
+                    user_answer=transcribed_text,
+                )
 
             # Get LLM evaluation from API
-            evaluation = await self._api_client.evaluate_answer(
+            response = await self._api_client.evaluate_answer(
                 card_id=self._current_card.get("id"),
                 user_answer=transcribed_text,
                 prompt=prompt,
@@ -327,31 +385,70 @@ class VoiceSession:
             self.state = SessionState.PRESENTING_FEEDBACK
             self.stats.cards_reviewed += 1
 
-            # Determine if correct based on rating
-            is_correct = evaluation.get("rating", 0) >= 2
+            # Extract evaluation from nested response structure
+            # Backend returns: {"evaluation": {...}, "error": ...}
+            eval_data = response.get("evaluation", {}) or {}
+
+            # Convert suggested_rating string to numeric rating
+            rating_map = {"again": 0, "hard": 1, "good": 2, "easy": 3}
+            suggested_rating = eval_data.get("suggested_rating", "good")
+            if isinstance(suggested_rating, str):
+                rating = rating_map.get(suggested_rating.lower(), 2)
+            else:
+                rating = suggested_rating if isinstance(suggested_rating, int) else 2
+
+            # Determine if correct based on is_correct field or rating
+            is_correct = eval_data.get("is_correct", rating >= 2)
             if is_correct:
                 self.stats.correct_count += 1
             else:
                 self.stats.incorrect_count += 1
 
+            # Get feedback text from evaluation data
+            feedback_text = eval_data.get("feedback", "")
+
             # Generate TTS for feedback
-            feedback_text = evaluation.get("feedback", "")
+            feedback_audio = None
+            feedback_sample_rate = 24000
+            feedback_audio_duration = 0.0
+            feedback_audio_is_silent = False
             if feedback_text:
                 tts_result = await self.pipeline.synthesize(feedback_text)
                 feedback_audio = base64.b64encode(tts_result.audio).decode("utf-8")
-            else:
-                feedback_audio = None
+                feedback_sample_rate = tts_result.sample_rate
+                feedback_audio_duration = tts_result.duration
+                feedback_audio_is_silent = getattr(tts_result, 'is_silent', False)
+
+            # Determine if auto-advance is needed
+            auto_advance = self._review_mode in (ReviewMode.ORAL, ReviewMode.CONVERSATIONAL)
 
             await self.websocket.send_json({
                 "type": "evaluation",
-                "rating": evaluation.get("rating"),
+                "rating": rating,
                 "is_correct": is_correct,
                 "feedback": feedback_text,
                 "expected_answer": card_back,
                 "user_answer": transcribed_text,
                 "audio": feedback_audio,
+                "sample_rate": feedback_sample_rate,
+                "audio_is_silent": feedback_audio_is_silent,
                 "stats": self._get_stats_dict(),
+                "auto_advance": auto_advance,
+                "review_mode": self._review_mode.value,
+                "feedback_audio_duration": feedback_audio_duration,
             })
+
+            # For oral and conversational modes, auto-rate and advance
+            if auto_advance:
+                # Minimum display time for evaluation feedback (in seconds)
+                # Ensures user has time to read feedback even without audio
+                MIN_EVALUATION_DISPLAY_SECS = 3.0
+
+                # Wait for audio to finish playing, or minimum display time
+                wait_time = max(MIN_EVALUATION_DISPLAY_SECS, feedback_audio_duration)
+                await asyncio.sleep(wait_time)
+
+                await self._auto_rate_and_advance(rating)
 
         except Exception as e:
             logger.error(f"Evaluation failed: {e}")
@@ -390,23 +487,47 @@ class VoiceSession:
             return
 
         card_front = self._current_card.get("front", "")
-        tts_result = await self.pipeline.synthesize(card_front)
+
+        # For conversational mode, regenerate with personality
+        if self._review_mode == ReviewMode.CONVERSATIONAL:
+            replay_text = await self._get_conversational_question(card_front)
+        else:
+            replay_text = card_front
+
+        tts_result = await self.pipeline.synthesize(replay_text)
 
         await self.websocket.send_json({
             "type": "card_replay",
             "card_id": self._current_card.get("id"),
             "audio": base64.b64encode(tts_result.audio).decode("utf-8"),
             "sample_rate": tts_result.sample_rate,
+            "audio_is_silent": getattr(tts_result, 'is_silent', False),
         })
 
     async def _complete_session(self) -> None:
         """Complete the session when all cards are reviewed."""
         self.state = SessionState.ENDED
 
+        # For conversational mode, generate encouraging outro
+        outro_audio = None
+        outro_text = None
+        outro_sample_rate = 24000
+        outro_audio_is_silent = False
+        if self._review_mode == ReviewMode.CONVERSATIONAL:
+            outro_text = await self._get_session_outro()
+            if outro_text:
+                tts_result = await self.pipeline.synthesize(outro_text)
+                outro_audio = base64.b64encode(tts_result.audio).decode("utf-8")
+                outro_sample_rate = tts_result.sample_rate
+                outro_audio_is_silent = getattr(tts_result, 'is_silent', False)
+
         await self.websocket.send_json({
             "type": "session_complete",
-            "message": "All cards reviewed!",
+            "message": outro_text or "All cards reviewed!",
             "stats": self._get_stats_dict(),
+            "audio": outro_audio,
+            "sample_rate": outro_sample_rate,
+            "audio_is_silent": outro_audio_is_silent,
         })
 
     async def _end_session(self) -> None:
@@ -449,8 +570,109 @@ class VoiceSession:
             "total_audio_duration": self.stats.total_audio_duration,
         }
 
+    # =========================================================================
+    # CONVERSATIONAL MODE HELPERS
+    # =========================================================================
+
+    async def _conversational_intro(self) -> None:
+        """Generate and speak a warm session greeting for conversational mode."""
+        try:
+            prompt = build_session_intro_prompt(self._total_cards)
+            intro_text = await self._api_client.generate_text(prompt)
+
+            if intro_text:
+                tts_result = await self.pipeline.synthesize(intro_text)
+                await self.websocket.send_json({
+                    "type": "session_intro",
+                    "text": intro_text,
+                    "audio": base64.b64encode(tts_result.audio).decode("utf-8"),
+                    "audio_duration": tts_result.duration,
+                    "sample_rate": tts_result.sample_rate,
+                    "audio_is_silent": getattr(tts_result, 'is_silent', False),
+                })
+        except Exception as e:
+            logger.warning(f"Failed to generate session intro: {e}")
+            # Continue without intro - not critical
+
+    async def _get_conversational_question(self, card_front: str) -> str:
+        """
+        Generate a Feynman-style question presentation for conversational mode.
+
+        Args:
+            card_front: The raw question text
+
+        Returns:
+            The question with personality added
+        """
+        try:
+            prompt = build_conversational_question_prompt(
+                question=card_front,
+                card_number=self._current_card_number,
+                total_cards=self._total_cards,
+            )
+            question_text = await self._api_client.generate_text(prompt)
+            return question_text if question_text else card_front
+        except Exception as e:
+            logger.warning(f"Failed to generate conversational question: {e}")
+            return card_front  # Fallback to plain question
+
+    async def _get_session_outro(self) -> str:
+        """
+        Generate an encouraging session conclusion for conversational mode.
+
+        Returns:
+            Outro text or empty string on failure
+        """
+        try:
+            accuracy = (
+                self.stats.correct_count / self.stats.cards_reviewed
+                if self.stats.cards_reviewed > 0
+                else 0.0
+            )
+            prompt = build_session_outro_prompt(
+                correct_count=self.stats.correct_count,
+                total_count=self.stats.cards_reviewed,
+                accuracy=accuracy,
+            )
+            return await self._api_client.generate_text(prompt)
+        except Exception as e:
+            logger.warning(f"Failed to generate session outro: {e}")
+            return ""
+
+    async def _auto_rate_and_advance(self, rating: int) -> None:
+        """
+        Auto-rate the current card and advance to the next.
+
+        Used by oral and conversational modes where the LLM determines the rating.
+
+        Args:
+            rating: The LLM-determined rating (0-3)
+        """
+        if not self._current_card:
+            return
+
+        try:
+            card_id = self._current_card.get("id")
+            await self._api_client.submit_review(card_id, rating)
+
+            await self.websocket.send_json({
+                "type": "card_rated",
+                "card_id": card_id,
+                "rating": rating,
+                "auto_rated": True,
+            })
+
+            # Present next card
+            await self._present_next_card()
+
+        except Exception as e:
+            logger.error(f"Failed to auto-rate card: {e}")
+            await self._send_error(f"Auto-rating failed: {e}")
+
     async def cleanup(self) -> None:
         """Cleanup session resources."""
         self._audio_buffer = b""
         self._current_card = None
         self.state = SessionState.ENDED
+        if self._api_client:
+            await self._api_client.close()

@@ -7,7 +7,7 @@
  * - Offline fallback page
  */
 
-const CACHE_VERSION = 'engram-v1';
+const CACHE_VERSION = 'engram-v2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 

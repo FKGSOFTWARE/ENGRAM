@@ -4,7 +4,7 @@ Voice processing pipeline with Silero VAD and faster-whisper STT.
 This module implements the core audio processing:
 - Voice Activity Detection (VAD) using Silero
 - Speech-to-Text (STT) using faster-whisper
-- Text-to-Speech (TTS) using Chatterbox or fallback
+- Text-to-Speech (TTS) using Gemini 2.5 Flash TTS
 """
 
 import asyncio
@@ -36,6 +36,7 @@ class TTSResult:
     audio: bytes
     sample_rate: int
     duration: float
+    is_silent: bool = False  # True if fallback silent audio was generated
 
 
 class VoicePipeline:
@@ -45,7 +46,7 @@ class VoicePipeline:
     Components:
     - Silero VAD: Detects speech segments in audio
     - faster-whisper: Transcribes speech to text
-    - Chatterbox/fallback: Synthesizes text to speech
+    - Gemini TTS: Synthesizes text to speech (Google's native audio model)
     """
 
     def __init__(
@@ -113,22 +114,14 @@ class VoicePipeline:
         logger.info("faster-whisper model loaded")
 
     async def _init_tts(self) -> None:
-        """Initialize TTS engine (Chatterbox or fallback)."""
+        """Initialize TTS engine (Gemini TTS)."""
         logger.info("Initializing TTS engine...")
 
-        try:
-            # Try to load Chatterbox TTS
-            from .tts_chatterbox import ChatterboxTTS
+        from .tts_fallback import GeminiTTS
 
-            self._tts_engine = ChatterboxTTS()
-            await self._tts_engine.initialize()
-            logger.info("Chatterbox TTS initialized")
-        except ImportError:
-            logger.warning("Chatterbox not available, using fallback TTS")
-            from .tts_fallback import FallbackTTS
-
-            self._tts_engine = FallbackTTS()
-            await self._tts_engine.initialize()
+        self._tts_engine = GeminiTTS()
+        await self._tts_engine.initialize()
+        logger.info("Gemini TTS initialized")
 
     async def shutdown(self) -> None:
         """Cleanup pipeline resources."""

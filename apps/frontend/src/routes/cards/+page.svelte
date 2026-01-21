@@ -11,7 +11,8 @@
   let deleteConfirmId = $state<string | null>(null);
 
   onMount(() => {
-    cardsStore.loadFromLocal();
+    // Sync with server to get any cards added via API
+    cardsStore.syncWithServer();
   });
 
   function handleAdd() {

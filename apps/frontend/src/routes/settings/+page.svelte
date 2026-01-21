@@ -40,6 +40,7 @@
         {$settingsStore.voiceEnabled ? 'Enabled' : 'Disabled'}
       </button>
     </div>
+
   </section>
 
   <section class="settings-section">

@@ -16,6 +16,13 @@ torch>=2.1.0
 torchaudio>=2.1.0
 numpy>=1.24.0
 
+# Gemini TTS (MVP)
+google-genai>=1.0.0  # Google Gemini SDK for TTS
+
+# NON-MVP: Alternative TTS (uncomment if needed)
+# edge-tts>=6.1.0  # Microsoft Edge TTS
+# pydub>=0.25.0    # MP3 to PCM conversion (requires ffmpeg)
+
 # HTTP Client (for Rust API calls)
 httpx>=0.26.0
 

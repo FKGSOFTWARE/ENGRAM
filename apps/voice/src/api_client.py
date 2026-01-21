@@ -107,15 +107,19 @@ class EngramAPIClient:
         """
         client = await self._get_client()
 
+        # Convert numeric rating to string enum expected by backend
+        rating_map = {0: "again", 1: "hard", 2: "good", 3: "easy"}
+        rating_str = rating_map.get(rating, "good")
+
         payload = {
             "card_id": card_id,
-            "rating": rating,
+            "rating": rating_str,
         }
         if response_time_ms is not None:
             payload["response_time_ms"] = response_time_ms
 
         try:
-            response = await client.post("/api/review", json=payload)
+            response = await client.post("/api/review/submit", json=payload)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -187,3 +191,39 @@ class EngramAPIClient:
             return response.status_code == 200
         except Exception:
             return False
+
+    async def generate_text(
+        self,
+        prompt: str,
+        max_tokens: int = 256,
+    ) -> str:
+        """
+        Generate text using the LLM.
+
+        Used for conversational mode intro/outro and natural question presentation.
+
+        Args:
+            prompt: The prompt to send to the LLM
+            max_tokens: Maximum tokens in response
+
+        Returns:
+            Generated text string
+        """
+        client = await self._get_client()
+
+        payload = {
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+        }
+
+        try:
+            response = await client.post("/api/llm/generate", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("text", "")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to generate text: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"API error generating text: {e}")
+            raise

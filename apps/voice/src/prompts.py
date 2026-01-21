@@ -173,3 +173,217 @@ Respond in JSON format:
     "expected_answer": "<brief expected answer>",
     "reasoning": "<why this followup helps>"
 }}"""
+
+
+# =============================================================================
+# ORAL MODE PROMPTS
+# =============================================================================
+
+
+def build_oral_feedback_prompt(
+    question: str,
+    expected_answer: str,
+    user_answer: str,
+) -> str:
+    """
+    Build a prompt for oral mode structured feedback.
+
+    Oral mode provides direct, efficient feedback with rating announcement.
+    No personality or small talk - just clear, concise evaluation.
+
+    Args:
+        question: The flashcard question/front
+        expected_answer: The expected answer/back
+        user_answer: The user's transcribed spoken answer
+
+    Returns:
+        Formatted prompt for oral feedback generation
+    """
+    return f"""Evaluate this flashcard answer and provide structured feedback for spoken delivery.
+
+Question: {question}
+Expected Answer: {expected_answer}
+Student's Answer: {user_answer}
+
+Be direct and clear. Your feedback will be spoken aloud.
+
+Evaluate using these criteria:
+- 0 (Again): Incorrect or no understanding shown
+- 1 (Hard): Partially correct with significant gaps
+- 2 (Good): Correct with minor variations
+- 3 (Easy): Complete and demonstrates clear understanding
+
+Consider:
+- Semantic equivalence (synonyms, paraphrasing are acceptable)
+- Speech transcription artifacts (um, uh) should be ignored
+- Key concepts must be present for higher ratings
+
+Respond in JSON format:
+{{
+    "rating": <0-3>,
+    "is_correct": <true/false>,
+    "spoken_feedback": "<feedback for TTS - be concise, state correctness, give the right answer if wrong, announce rating as Again/Hard/Good/Easy>"
+}}
+
+Example spoken_feedback formats:
+- "Correct. Rating: Good."
+- "Correct! The answer is X. Rating: Easy."
+- "Incorrect. The answer is X. Rating: Again."
+- "Partially correct. You mentioned X but missed Y. Rating: Hard."
+"""
+
+
+# =============================================================================
+# CONVERSATIONAL MODE PROMPTS (Feynman Style)
+# =============================================================================
+
+
+def build_conversational_question_prompt(
+    question: str,
+    card_number: int,
+    total_cards: int,
+) -> str:
+    """
+    Build a prompt for presenting a question in conversational Feynman style.
+
+    Args:
+        question: The flashcard question to present
+        card_number: Current card number in session
+        total_cards: Total cards in session
+
+    Returns:
+        Formatted prompt for question presentation
+    """
+    return f"""You are Richard Feynman teaching a student with flashcards. Present this question naturally.
+
+Question to ask: "{question}"
+
+This is card {card_number} of {total_cards}.
+
+Be curious, engaging, maybe add why this is interesting. Keep it brief (1-2 sentences + the question).
+Don't be over the top - be genuinely curious and warm, like a friendly teacher.
+
+Examples of good intros:
+- "Ah, this is a fun one! [question]"
+- "Now here's something interesting... [question]"
+- "Okay, let me ask you this: [question]"
+- "Here's a good one: [question]"
+
+Output ONLY the text to speak, no JSON. Do not include stage directions or meta-commentary."""
+
+
+def build_conversational_evaluation_prompt(
+    question: str,
+    expected_answer: str,
+    user_answer: str,
+) -> str:
+    """
+    Build a prompt for conversational Feynman-style evaluation.
+
+    The response should feel like a natural conversation with a brilliant,
+    approachable teacher. Rating is determined but not announced.
+
+    Args:
+        question: The flashcard question/front
+        expected_answer: The expected answer/back
+        user_answer: The user's transcribed spoken answer
+
+    Returns:
+        Formatted prompt for conversational evaluation
+    """
+    return f"""You are Richard Feynman responding to a student's answer. Be warm, curious, and teach naturally.
+
+Question: {question}
+Expected Answer: {expected_answer}
+Student said: "{user_answer}"
+
+Respond as Feynman would:
+- Be genuinely curious about their thinking
+- If wrong, explain WHY in an intuitive way
+- Use simple analogies if helpful
+- Be encouraging but honest
+- Keep it conversational and natural
+- End with a natural transition phrase
+
+Important:
+- Do NOT announce the rating - it happens silently
+- Focus on teaching and understanding
+- Keep response brief (2-4 sentences for correct, 3-5 for incorrect)
+- Make it feel like a real conversation
+
+Respond in JSON format:
+{{
+    "rating": <0-3>,
+    "is_correct": <true/false>,
+    "spoken_feedback": "<what to say aloud - natural, teaching-focused>",
+    "teaching_note": "<optional deeper explanation or insight>"
+}}
+
+Rating guide (internal only, don't mention):
+- 0: No understanding
+- 1: Partial understanding
+- 2: Good understanding with minor gaps
+- 3: Excellent, complete understanding"""
+
+
+def build_session_intro_prompt(total_cards: int) -> str:
+    """
+    Build a prompt for generating a warm session greeting.
+
+    Args:
+        total_cards: Number of cards in the session
+
+    Returns:
+        Formatted prompt for session intro
+    """
+    return f"""Generate a warm 1-2 sentence greeting to start a flashcard review session.
+
+Session info: {total_cards} cards to review
+
+Be encouraging and casual, like a friendly tutor. Keep it brief and natural.
+Don't be overly enthusiastic or use too many exclamation points.
+
+Examples:
+- "Hey there! Let's work through these cards together."
+- "Alright, ready to review some cards? Let's do it."
+- "Good to see you. We've got {total_cards} cards today - let's get started."
+
+Output ONLY the greeting text, no JSON or meta-commentary."""
+
+
+def build_session_outro_prompt(
+    correct_count: int,
+    total_count: int,
+    accuracy: float,
+) -> str:
+    """
+    Build a prompt for generating an encouraging session conclusion.
+
+    Args:
+        correct_count: Number of correct answers
+        total_count: Total cards reviewed
+        accuracy: Accuracy percentage (0.0 to 1.0)
+
+    Returns:
+        Formatted prompt for session outro
+    """
+    accuracy_pct = int(accuracy * 100)
+
+    return f"""Generate an encouraging 1-2 sentence conclusion for a completed review session.
+
+Session results:
+- {correct_count} out of {total_count} correct
+- {accuracy_pct}% accuracy
+
+Be positive regardless of score. Acknowledge their effort.
+Keep it brief and genuine - not over the top.
+
+For lower scores: Focus on effort and improvement
+For higher scores: Acknowledge the good work without being excessive
+
+Examples:
+- "Nice work! You got through all of them. See you next time."
+- "Good session. Keep at it and you'll see those concepts stick."
+- "Well done today - {accuracy_pct}% is solid. Take a break, you've earned it."
+
+Output ONLY the conclusion text, no JSON or meta-commentary."""

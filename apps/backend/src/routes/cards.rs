@@ -12,7 +12,7 @@ use crate::AppState;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_cards).post(create_card))
-        .route("/{id}", get(get_card).patch(update_card).delete(delete_card))
+        .route("/:id", get(get_card).patch(update_card).delete(delete_card))
 }
 
 async fn list_cards(
